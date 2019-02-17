@@ -16,6 +16,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AP_RangeFinder_LightWareSerial.h"
 #include <AP_SerialManager/AP_SerialManager.h>
+#include <GCS_MAVLink/GCS.h>
 #include <ctype.h>
 
 extern const AP_HAL::HAL& hal;
@@ -32,7 +33,10 @@ AP_RangeFinder_LightWareSerial::AP_RangeFinder_LightWareSerial(RangeFinder::Rang
 {
     uart = serial_manager.find_serial(AP_SerialManager::SerialProtocol_Rangefinder, serial_instance);
     if (uart != nullptr) {
-        uart->begin(serial_manager.find_baudrate(AP_SerialManager::SerialProtocol_Rangefinder, serial_instance));
+        baudrate = serial_manager.find_baudrate(AP_SerialManager::SerialProtocol_Rangefinder, serial_instance);
+        uart->begin(baudrate);
+        // send enough serial transitions to trigger LW20 into serial mode
+        uart->write("www\r\n");
     }
 }
 
@@ -44,6 +48,7 @@ AP_RangeFinder_LightWareSerial::AP_RangeFinder_LightWareSerial(RangeFinder::Rang
 bool AP_RangeFinder_LightWareSerial::detect(AP_SerialManager &serial_manager, uint8_t serial_instance)
 {
     return serial_manager.find_serial(AP_SerialManager::SerialProtocol_Rangefinder, serial_instance) != nullptr;
+
 }
 
 // read - return last value measured by sensor
@@ -73,8 +78,17 @@ bool AP_RangeFinder_LightWareSerial::get_reading(uint16_t &reading_cm)
         }
     }
 
-    // we need to write a byte to prompt another reading
-    uart->write('d');
+    uint32_t now = AP_HAL::millis();
+    if (now - last_init_ms > 1000 &&
+        now - state.last_reading_ms > 1000) {
+        // send enough serial transitions to trigger LW20 into serial
+        // mode
+        uart->write("www\r\n");
+        uart->begin(baudrate, 256, 256);
+        last_init_ms = now;
+    } else {
+        uart->write('d');
+    }
 
     if (count == 0) {
         return false;
